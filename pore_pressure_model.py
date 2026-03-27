@@ -9,6 +9,8 @@ import warnings
 from scipy.signal import fftconvolve
 from scipy.special import erfc
 
+from dvv_model_utils import SECONDS_PER_YEAR, fit_annual_harmonic
+
 # ========== #
 # User Input #
 # ========== #
@@ -28,6 +30,14 @@ RHO_W = 1000.0
 GRAVITY = 9.80665
 ALPHA = 0.1
 HYDRAULIC_DIFFUSIVITY_M2_S = 0.01
+POISSON_RATIO = 0.3
+SHEAR_MODULUS_PA = 1.41e10
+SECOND_MURNAGHAN_PA = 3.2e13
+HORIZONTAL_WAVENUMBER_M_INV = 2.0 * np.pi / (4.0e4)
+THERMOELASTIC_DEPTH_M = 1000.0
+THERMAL_EXPANSION_COEFF_C_INV = 1.0e-5
+THERMAL_DIFFUSIVITY_M2_S = 1.0e-6
+INCOMPETENT_LAYER_THICKNESS_M = 10.4
 
 # Output files
 OUTPUT_CSV_PATH = "pore_pressure_output.csv"
@@ -37,15 +47,24 @@ OUTPUT_CSV_PATH = "pore_pressure_output.csv"
 # =============== #
 def read_groundwater_csv(filepath):
     """
-    Read the groudwater data    
+    Read groundwater and well-temperature data from the well CSV.
     """
-    df = pd.read_csv(filepath, usecols=["datetime", "groundwater level [m a.s.l.]"])
+    df = pd.read_csv(
+        filepath,
+        usecols=["datetime", "temperature [°C]", "groundwater level [m a.s.l.]"],
+    )
     df["datetime"] = pd.to_datetime(df["datetime"])
+    df["temperature [°C]"] = pd.to_numeric(df["temperature [°C]"], errors="coerce")
     df["groundwater level [m a.s.l.]"] = pd.to_numeric(df["groundwater level [m a.s.l.]"])
     df.loc[df["groundwater level [m a.s.l.]"].isin([-777, -777.0]), "groundwater level [m a.s.l.]"] = np.nan
     return (
-        df.rename(columns={"groundwater level [m a.s.l.]": "gwl_m_asl"})
-        .dropna(subset=["gwl_m_asl"])
+        df.rename(
+            columns={
+                "temperature [°C]": "well_temp_c",
+                "groundwater level [m a.s.l.]": "gwl_m_asl",
+            }
+        )
+        .dropna(subset=["gwl_m_asl", "well_temp_c"])
         .set_index("datetime")
         .sort_index()
     )
@@ -236,6 +255,44 @@ def infer_regular_dt_seconds(index):
         raise ValueError("Time index must be increasing")
     return t_s, dt_s
 
+
+def compute_tsai_thermoelastic_response(
+    index,
+    temperature_c,
+    poisson_ratio,
+    shear_modulus_pa,
+    second_murnaghan_pa,
+    wavenumber_m_inv,
+    depth_m,
+    thermal_expansion_coeff_c_inv,
+    thermal_diffusivity_m2_s,
+    incompetent_layer_thickness_m,
+    period_s=SECONDS_PER_YEAR,
+):
+    harmonic = fit_annual_harmonic(index, temperature_c, period_s=period_s)
+    t_s = (pd.to_datetime(index) - pd.to_datetime(index)[0]).total_seconds().astype(float)
+    omega = harmonic["omega"]
+    temp_phase_rad = harmonic["phase_rad"]
+    thermal_lag_s = (
+        np.pi / (4.0 * omega)
+        + incompetent_layer_thickness_m / np.sqrt(2.0 * omega * thermal_diffusivity_m2_s)
+    )
+    strain_prefactor = (
+        ((1.0 + poisson_ratio) / (1.0 - poisson_ratio))
+        * wavenumber_m_inv
+        * thermal_expansion_coeff_c_inv
+        * harmonic["amplitude"]
+        * np.sqrt((thermal_diffusivity_m2_s / omega) * np.pi / 4.0)
+    )
+    strain = strain_prefactor * np.cos(omega * t_s + temp_phase_rad - omega * thermal_lag_s)
+    dvv_thermo = (
+        (second_murnaghan_pa / shear_modulus_pa)
+        * strain
+        * np.exp(-wavenumber_m_inv * depth_m)
+        * (1.0 - 2.0 * poisson_ratio)
+    )
+    return pd.Series(dvv_thermo, index=index, name="dvv_temp_thermoelastic")
+
 def run_pore_pressure_workflow(
     gwl_csv_path,
     atm_txt_path,
@@ -248,6 +305,14 @@ def run_pore_pressure_workflow(
     g=None,
     alpha=None,
     hydraulic_diffusivity_m2_s=None,
+    poisson_ratio=POISSON_RATIO,
+    shear_modulus_pa=SHEAR_MODULUS_PA,
+    second_murnaghan_pa=SECOND_MURNAGHAN_PA,
+    horizontal_wavenumber_m_inv=HORIZONTAL_WAVENUMBER_M_INV,
+    thermoelastic_depth_m=THERMOELASTIC_DEPTH_M,
+    thermal_expansion_coeff_c_inv=THERMAL_EXPANSION_COEFF_C_INV,
+    thermal_diffusivity_m2_s=THERMAL_DIFFUSIVITY_M2_S,
+    incompetent_layer_thickness_m=INCOMPETENT_LAYER_THICKNESS_M,
 ):
     """
     Run the functions above all together to get the result
@@ -256,7 +321,7 @@ def run_pore_pressure_workflow(
 
     gwl = read_groundwater_csv(gwl_csv_path)
     gwl_rs = prepare_time_series(
-        gwl,
+        gwl[["gwl_m_asl"]],
         start=start,
         end=end,
         rule=resample_rule,
@@ -265,6 +330,15 @@ def run_pore_pressure_workflow(
     )
     model_index = gwl_rs.index
     _, dt_s = infer_regular_dt_seconds(model_index)
+    temp_rs = prepare_time_series(
+        gwl[["well_temp_c"]],
+        start=start,
+        end=end,
+        rule=resample_rule,
+        target_index=model_index,
+        dataset_name="well temperature",
+        filepath=gwl_csv_path,
+    )
 
     # the gwl data aligns with the final temporal resolution (defined by users from RULE)
 
@@ -283,11 +357,29 @@ def run_pore_pressure_workflow(
     # the atm can just align with it
 
     loadings = build_default_loadings(gwl_rs.values, patm_rs.values, rho_w, g, alpha)
+
+    # you could notice that here thermo effect is not counted 
+    # bc thermo effect should be based on the thermoelasticity
+    # which will be calculated in the other code
+
     depths_m = tuple(float(depth) for depth in depths_m)
 
     out = pd.DataFrame(index=model_index)
     out["gwl_m_asl"] = gwl_rs.values
+    out["well_temp_c"] = temp_rs.values
     out["patm_pa"] = patm_rs.values
+    out["dvv_temp_thermoelastic"] = compute_tsai_thermoelastic_response(
+        index=model_index,
+        temperature_c=temp_rs.values,
+        poisson_ratio=poisson_ratio,
+        shear_modulus_pa=shear_modulus_pa,
+        second_murnaghan_pa=second_murnaghan_pa,
+        wavenumber_m_inv=horizontal_wavenumber_m_inv,
+        depth_m=thermoelastic_depth_m,
+        thermal_expansion_coeff_c_inv=thermal_expansion_coeff_c_inv,
+        thermal_diffusivity_m2_s=thermal_diffusivity_m2_s,
+        incompetent_layer_thickness_m=incompetent_layer_thickness_m,
+    ).values
 
     for loading in loadings:
         out[f"{loading['name']}_loading_pa"] = loading["values_pa"]
