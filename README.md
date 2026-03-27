@@ -49,7 +49,8 @@ This script:
 
 - Reads the well CSV
 - Reads the atmospheric pressure text file
-- Aligns all data sets to the final user-defined time resolution
+- Builds an explicit regular model time grid using `pd.date_range(start, end, freq=RESAMPLE_RULE)`
+- Aligns all data sets to that final user-defined time resolution
 - Computes pore-pressure responses from:
   - groundwater level
   - atmospheric pressure
@@ -271,6 +272,18 @@ The fitted output is written to:
 
 - `dvv_model`
 - `dvv_residual = dvv_obs - dvv_model`
+
+## Time-Grid Note
+
+The physical predictors are not indexed by the raw groundwater sampling times. Instead, the workflow explicitly builds a complete regular model grid from:
+
+```text
+pd.date_range(start, end, freq=RESAMPLE_RULE)
+```
+
+and aligns groundwater, atmospheric pressure, and well temperature to that common grid.
+
+This matters because observed `dv/v` is later joined to the predictor table using exact timestamps. Using a complete regular model grid avoids artificially sparse `dv/v` comparison results caused by irregular groundwater data availability.
 
 ## Inputs
 

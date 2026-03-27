@@ -322,16 +322,20 @@ def run_pore_pressure_workflow(
     """
     os.makedirs(os.path.dirname(output_csv_path), exist_ok=True)
 
+    model_index = pd.date_range(start=start, end=end, freq=resample_rule)
+    if len(model_index) < 2:
+        raise ValueError("The requested model time grid must contain at least two samples")
+
     gwl = read_groundwater_csv(gwl_csv_path)
     gwl_rs = prepare_time_series(
         gwl[["gwl_m_asl"]],
         start=start,
         end=end,
         rule=resample_rule,
+        target_index=model_index,
         dataset_name="groundwater",
         filepath=gwl_csv_path,
     )
-    model_index = gwl_rs.index
     _, dt_s = infer_regular_dt_seconds(model_index)
     temp_rs = prepare_time_series(
         gwl[["well_temp_c"]],
@@ -403,7 +407,7 @@ def run_pore_pressure_workflow(
         out[f"Pp_total_z{int(depth_m)}m_pa"] = total_pp
         out[f"dPp_total_z{int(depth_m)}m_pa"] = total_pp - np.nanmean(total_pp)
 
-    out.to_csv(output_csv_path, index=True)
+    out.to_csv(output_csv_path, index=True, index_label="datetime")
     return out
 
 if __name__ == "__main__":

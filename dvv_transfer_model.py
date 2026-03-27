@@ -169,7 +169,7 @@ def run_dvv_transfer_workflow(
         n_parameters=fit["n_parameters"],
     )
     merged["model_depth_m"] = float(model_depth_m)
-    merged.to_csv(output_timeseries_csv, index=True)
+    merged.to_csv(output_timeseries_csv, index=True, index_label="datetime")
 
     coeff_df = pd.DataFrame(
         {
