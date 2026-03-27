@@ -5,6 +5,7 @@
 #
 import numpy as np
 import pandas as pd
+import os
 import warnings
 from scipy.signal import fftconvolve
 from scipy.special import erfc
@@ -40,7 +41,8 @@ THERMAL_DIFFUSIVITY_M2_S = 1.0e-6
 INCOMPETENT_LAYER_THICKNESS_M = 10.4
 
 # Output files
-OUTPUT_CSV_PATH = "pore_pressure_output.csv"
+OUTPUT_DIR = "../output"
+OUTPUT_CSV_PATH = os.path.join(OUTPUT_DIR, "pore_pressure_output.csv")
 
 # =============== #
 # Data Management #
@@ -318,6 +320,7 @@ def run_pore_pressure_workflow(
     Run the functions above all together to get the result
     Output is a csv file containing modeled pore pressure at different depth
     """
+    os.makedirs(os.path.dirname(output_csv_path), exist_ok=True)
 
     gwl = read_groundwater_csv(gwl_csv_path)
     gwl_rs = prepare_time_series(

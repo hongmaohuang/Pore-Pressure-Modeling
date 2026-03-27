@@ -16,7 +16,8 @@ from dvv_model_utils import (
 # ========== #
 # User Input #
 # ========== #
-PORE_PRESSURE_CSV_PATH = "pore_pressure_output.csv"
+OUTPUT_DIR = "../output"
+PORE_PRESSURE_CSV_PATH = os.path.join(OUTPUT_DIR, "pore_pressure_output.csv")
 OBSERVED_DVV_INPUT_MODE = "DTT_FOLDER"  # "CSV" or "DTT_FOLDER"
 OBSERVED_DVV_CSV_PATH = "observed_dvv.csv"
 OBSERVED_DVV_DTT_FOLDER = "/Users/hmhuang/Sth_should_be_local/Iceland/dvv_results/1_filter_202603/01/005_DAYS/ZZ"
@@ -30,8 +31,8 @@ MODEL_DEPTH_M = 1900.0
 FIT_INTERCEPT = True
 INCLUDE_THERMOELASTIC = True
 
-OUTPUT_TIMESERIES_CSV = "dvv_transfer_output.csv"
-OUTPUT_COEFFICIENTS_CSV = "dvv_transfer_coefficients.csv"
+OUTPUT_TIMESERIES_CSV = os.path.join(OUTPUT_DIR, "dvv_transfer_output.csv")
+OUTPUT_COEFFICIENTS_CSV = os.path.join(OUTPUT_DIR, "dvv_transfer_coefficients.csv")
 
 def read_pore_pressure_output(filepath):
     df = pd.read_csv(filepath, parse_dates=["datetime"])
@@ -142,6 +143,7 @@ def run_dvv_transfer_workflow(
     output_timeseries_csv,
     output_coefficients_csv,
 ):
+    os.makedirs(os.path.dirname(output_timeseries_csv), exist_ok=True)
     pore_df = read_pore_pressure_output(pore_pressure_csv_path)
     dvv_df = read_observed_dvv_series()
     predictors = build_predictor_dataframe(

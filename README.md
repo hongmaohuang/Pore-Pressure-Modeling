@@ -6,11 +6,12 @@ This branch contains a small workflow for:
 2. Projecting those predictors to theoretical `dv/v(t)`
 3. Evaluating the modeled `dv/v` against observed `dv/v`
 
-The implementation is organized into three scripts:
+The implementation is organized into four scripts:
 
 - `pore_pressure_model.py`
 - `dvv_transfer_model.py`
 - `evaluate_dvv_model.py`
+- `visualize_dvv_results.py`
 
 An additional helper module is shared by the workflow:
 
@@ -28,6 +29,9 @@ The workflow is intentionally split by responsibility:
 
 3. `evaluate_dvv_model.py`
    Computes fit statistics, annual amplitude/phase metrics, and rolling cross-validation.
+
+4. `visualize_dvv_results.py`
+   Produces figures from the modeled and observed `dv/v` outputs.
 
 The current physical branches are:
 
@@ -105,6 +109,22 @@ This script:
   - annual phase
   - annual phase difference
 - Performs rolling-origin cross-validation
+
+### `visualize_dvv_results.py`
+
+This script:
+
+- Reads the output from `dvv_transfer_model.py`
+- Produces PNG figures for:
+  - observed vs modeled `dv/v`
+  - `dv/v` residual
+  - physical predictors used in the transfer model
+
+The current plotting script writes the figures to the common output folder:
+
+- `../output/fig_dvv_observed_vs_modeled.png`
+- `../output/fig_dvv_residual.png`
+- `../output/fig_dvv_predictors.png`
 
 ## Shared Helper Module
 
@@ -283,13 +303,24 @@ The transfer script supports:
 
 ## How to Run
 
-Run the three scripts in order:
+Run the four scripts in order:
 
 ```bash
 python pore_pressure_model.py
 python dvv_transfer_model.py
 python evaluate_dvv_model.py
+python visualize_dvv_results.py
 ```
+
+## Output Directory
+
+All generated CSV files and figures are written to:
+
+```text
+../output
+```
+
+Each script creates the directory automatically if it does not already exist.
 
 ## Configuration Notes
 
@@ -336,17 +367,23 @@ Set:
 
 ### From `pore_pressure_model.py`
 
-- predictor CSV containing aligned observations and physical model outputs
+- `../output/pore_pressure_output.csv`
 
 ### From `dvv_transfer_model.py`
 
-- `dvv_transfer_output.csv`
-- `dvv_transfer_coefficients.csv`
+- `../output/dvv_transfer_output.csv`
+- `../output/dvv_transfer_coefficients.csv`
 
 ### From `evaluate_dvv_model.py`
 
-- `dvv_model_metrics.csv`
-- `dvv_model_cv.csv`
+- `../output/dvv_model_metrics.csv`
+- `../output/dvv_model_cv.csv`
+
+### From `visualize_dvv_results.py`
+
+- `../output/fig_dvv_observed_vs_modeled.png`
+- `../output/fig_dvv_residual.png`
+- `../output/fig_dvv_predictors.png`
 
 ## Current Assumptions and Limits
 

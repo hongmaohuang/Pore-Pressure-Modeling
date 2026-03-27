@@ -4,6 +4,7 @@
 #
 import numpy as np
 import pandas as pd
+import os
 
 from dvv_model_utils import (
     compute_basic_metrics,
@@ -17,11 +18,12 @@ from dvv_model_utils import (
 # ========== #
 # User Input #
 # ========== #
-DVV_TRANSFER_OUTPUT_CSV = "dvv_transfer_output.csv"
-DVV_TRANSFER_COEFFICIENTS_CSV = "dvv_transfer_coefficients.csv"
+OUTPUT_DIR = "../output"
+DVV_TRANSFER_OUTPUT_CSV = os.path.join(OUTPUT_DIR, "dvv_transfer_output.csv")
+DVV_TRANSFER_COEFFICIENTS_CSV = os.path.join(OUTPUT_DIR, "dvv_transfer_coefficients.csv")
 
-OUTPUT_METRICS_CSV = "dvv_model_metrics.csv"
-OUTPUT_CV_CSV = "dvv_model_cv.csv"
+OUTPUT_METRICS_CSV = os.path.join(OUTPUT_DIR, "dvv_model_metrics.csv")
+OUTPUT_CV_CSV = os.path.join(OUTPUT_DIR, "dvv_model_cv.csv")
 
 FIT_INTERCEPT = True
 N_CV_SPLITS = 5
@@ -63,6 +65,7 @@ def run_evaluation_workflow(
     fit_intercept,
     n_cv_splits,
 ):
+    os.makedirs(os.path.dirname(output_metrics_csv), exist_ok=True)
     df = read_transfer_output(dvv_transfer_output_csv)
     coeff_df = read_coefficients(dvv_transfer_coefficients_csv)
     feature_columns = infer_feature_columns(df)
