@@ -127,6 +127,11 @@ The current plotting script writes the figures to the common output folder:
 - `../output/fig_dvv_residual.png`
 - `../output/fig_dvv_predictors.png`
 
+In the current plotting defaults:
+
+- the observed `dv/v` is shown both as a raw gray curve and as a median-filtered black curve
+- the observed-vs-modeled and residual plots use a fixed y-axis range of `±0.3%` (`±0.003` in `dv/v` units)
+
 ## Shared Helper Module
 
 ### `dvv_model_utils.py`
