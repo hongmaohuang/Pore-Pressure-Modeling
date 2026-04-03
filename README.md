@@ -542,4 +542,5 @@ Set:
 ## References
 
 - Luo, B., Zhu, H., & Lumley, D. (2025). Seismic Monitoring of Baseflow and Groundwater Changes in the Yellowstone National Park. Geophysical Research Letters.
+- Rivet, D., Brenguier, F., & Cappa, F. (2015). Improved detection of preeruptive seismic velocity drops at the Piton de La Fournaise volcano. Geophysical Research Letters, 42, 6332-6339. https://doi.org/10.1002/2015GL064835
 - Tsai, V. C. (2011). A model for seasonal changes in GPS positions and seismic wave speeds due to thermoelastic and hydrologic variations.
