@@ -39,8 +39,8 @@ def read_coefficients(filepath):
 
 
 def infer_feature_columns(df):
-    excluded = {"dvv_obs", "dvv_model", "dvv_residual", "model_depth_m"}
-    return [col for col in df.columns if col not in excluded]
+    candidate_columns = ["pp_gwl_pa", "pp_atm_pa", "dvv_temp_thermoelastic"]
+    return [col for col in candidate_columns if col in df.columns]
 
 
 def compute_amplitude_phase_metrics(index, observed, modeled):
@@ -69,41 +69,68 @@ def run_evaluation_workflow(
     df = read_transfer_output(dvv_transfer_output_csv)
     coeff_df = read_coefficients(dvv_transfer_coefficients_csv)
     feature_columns = infer_feature_columns(df)
+    metric_rows = []
+    split_definitions = [("all", np.ones(len(df), dtype=bool))]
+    if "data_split" in df.columns:
+        split_definitions.extend(
+            [
+                ("calibration", df["data_split"].eq("calibration").to_numpy()),
+                ("validation", df["data_split"].eq("validation").to_numpy()),
+            ]
+        )
 
-    basic = compute_basic_metrics(df["dvv_obs"].to_numpy(), df["dvv_model"].to_numpy())
-    info = compute_information_criteria(
-        y_true=df["dvv_obs"].to_numpy(),
-        y_pred=df["dvv_model"].to_numpy(),
-        n_parameters=len(coeff_df),
-    )
-    amp_phase = compute_amplitude_phase_metrics(
-        index=df.index,
-        observed=df["dvv_obs"].to_numpy(),
-        modeled=df["dvv_model"].to_numpy(),
-    )
-
-    metrics_df = pd.DataFrame(
-        [
+    for split_name, split_mask in split_definitions:
+        split_df = df.loc[split_mask]
+        if split_df.empty:
+            continue
+        basic = compute_basic_metrics(
+            split_df["dvv_obs"].to_numpy(),
+            split_df["dvv_model"].to_numpy(),
+        )
+        info = compute_information_criteria(
+            y_true=split_df["dvv_obs"].to_numpy(),
+            y_pred=split_df["dvv_model"].to_numpy(),
+            n_parameters=len(coeff_df),
+        )
+        amp_phase = compute_amplitude_phase_metrics(
+            index=split_df.index,
+            observed=split_df["dvv_obs"].to_numpy(),
+            modeled=split_df["dvv_model"].to_numpy(),
+        )
+        metric_rows.append(
             {
+                "split": split_name,
                 **basic,
                 **info,
                 **amp_phase,
-                "n_obs": len(df),
+                "n_obs": len(split_df),
                 "n_parameters": len(coeff_df),
             }
-        ]
-    )
+        )
+
+    metrics_df = pd.DataFrame(metric_rows)
     metrics_df.to_csv(output_metrics_csv, index=False)
 
-    X = df[feature_columns].to_numpy(dtype=float)
-    y = df["dvv_obs"].to_numpy(dtype=float)
-    cv_df = rolling_origin_cross_validation(
-        X=X,
-        y=y,
-        feature_names=feature_columns,
-        fit_intercept=fit_intercept,
-        n_splits=n_cv_splits,
-    )
+    if "method" in coeff_df.columns and coeff_df["method"].eq(
+        "extended_rivet_like_band_transfer"
+    ).any():
+        cv_df = pd.DataFrame(
+            [
+                {
+                    "note": "Rolling CV is not implemented for the extended Rivet-like band-transfer model.",
+                }
+            ]
+        )
+    else:
+        X = df[feature_columns].to_numpy(dtype=float)
+        y = df["dvv_obs"].to_numpy(dtype=float)
+        cv_df = rolling_origin_cross_validation(
+            X=X,
+            y=y,
+            feature_names=feature_columns,
+            fit_intercept=fit_intercept,
+            n_splits=n_cv_splits,
+        )
     cv_df.to_csv(output_cv_csv, index=False)
     return metrics_df, cv_df
 
