@@ -25,7 +25,7 @@ The workflow is intentionally split by responsibility:
    Builds the physical predictors on a common time grid.
 
 2. `dvv_transfer_model.py`
-   Reads those predictors and fits a transfer model to observed `dv/v`.
+   Reads those predictors and builds an extended Rivet-like transfer model to observed `dv/v`.
 
 3. `evaluate_dvv_model.py`
    Computes fit statistics, annual amplitude/phase metrics, and rolling cross-validation.
@@ -80,11 +80,15 @@ This script:
   - groundwater pore-pressure predictor
   - atmospheric pore-pressure predictor
   - thermoelastic predictor
-- Fits a linear transfer model
+- Band-pass filters each predictor and the observed `dv/v` into Rivet-style period bands
+- Estimates band-dependent transfer coefficients using only the configured calibration period
+- Applies those coefficients to both the calibration and validation periods
 - Outputs:
   - modeled `dv/v`
   - residual `dv/v`
   - transfer coefficients
+  - a `data_split` label for each sample (`calibration` or `validation`)
+  - predictor-specific modeled contributions
 
 Observed `dv/v` can currently be read in two ways:
 
@@ -92,6 +96,11 @@ Observed `dv/v` can currently be read in two ways:
 - `DTT_FOLDER`
 
 For the current branch settings, the script is configured to read from a DTT results folder and to use the median of all non-autocorrelation station pairs when `DVV_PAIR_MODE = "ALL"`.
+When `DVV_VALUE_COLUMN = "M0"`, the script converts DTT `dt/t` to observed `dv/v (%)` using:
+
+```text
+dv/v (%) = -100 * dt/t
+```
 
 ### `evaluate_dvv_model.py`
 
@@ -109,6 +118,7 @@ This script:
   - annual amplitude
   - annual phase
   - annual phase difference
+- Writes metrics separately for `all`, `calibration`, and `validation`
 - Performs rolling-origin cross-validation
 
 ### `visualize_dvv_results.py`
@@ -130,7 +140,10 @@ The current plotting script writes the figures to the common output folder:
 In the current plotting defaults:
 
 - the observed `dv/v` is shown both as a raw gray curve and as a median-filtered black curve
-- the observed-vs-modeled and residual plots use a fixed y-axis range of `±0.3%` (`±0.003` in `dv/v` units)
+- the observed-vs-modeled and residual plots use a fixed y-axis range of `±0.3%`
+- the residual plot includes daily seismicity counts for events with `M > 3`
+- the observed-vs-modeled figure also includes a lower panel showing total hydraulic pore pressure (`gwl + atm`) before transfer, with the thermoelastic predictor shown on a secondary axis when available
+- calibration and validation periods are lightly shaded in the `dv/v` comparison and residual plots
 
 ## Shared Helper Module
 
@@ -176,7 +189,7 @@ where:
 - `tau` is lag time
 - `c` is hydraulic diffusivity
 
-### 3. Mixed drained / undrained response
+### 3. Rivet / Roeloffs poroelastic response
 
 For a loading time series `L(t)`, the current implementation computes:
 
@@ -187,18 +200,30 @@ dL(t) = L(t) - L(t-1)
 and then:
 
 ```text
-Response(t) = (1 - alpha) * [dL * K](t) + alpha * L(t)
+Response(z, t) = sum_i dL_i * [alpha_p * erf(x_i) + erfc(x_i)]
 ```
 
 where:
 
-- `alpha` is the direct-fraction mixing term
-- `[dL * K](t)` denotes convolution with the diffusion kernel
+- `x_i = z / sqrt(4 * c * tau_i)`
+- `tau_i` is the lag time for each increment
+- `alpha_p` is the poroelastic constant
 
 This formulation is applied to:
 
 - groundwater pressure loading
 - atmospheric pressure loading
+
+The poroelastic constant is computed from:
+
+```text
+alpha_p = B * (1 + nu_u) / [3 * (1 - nu_u)]
+```
+
+where:
+
+- `B` is Skempton's coefficient
+- `nu_u` is the undrained Poisson ratio
 
 ### 4. Total pore pressure
 
@@ -260,23 +285,42 @@ This branch is computed in `pore_pressure_model.py` and exported as:
 
 ### 6. Transfer from predictors to modeled `dv/v`
 
-The current transfer model is linear:
+The current implementation uses an extended Rivet-like band transfer.
+
+For each period band `Bi`, the transfer coefficient is estimated from the calibration period using the Rivet-style covariance / variance idea:
 
 ```text
-dv/v_model(t) = b0 + b1 * X_gwl(t) + b2 * X_atm(t) + b3 * X_temp(t)
+K(Bi) ~= cov[dv/v(Bi), X(Bi)] / var[X(Bi)]
 ```
 
-where:
+In the current extended version, this is applied separately to:
 
-- `X_gwl(t)` is the groundwater pore-pressure predictor at the selected depth
-- `X_atm(t)` is the atmospheric pore-pressure predictor at the selected depth
-- `X_temp(t)` is the thermoelastic predictor
-- `b0, b1, b2, b3` are fitted coefficients
+- `X_gwl(Bi)`
+- `X_atm(Bi)`
+- `X_temp(Bi)`
+
+and the modeled time series is reconstructed by summing the bandwise contributions:
+
+```text
+dv/v_model(t) ~= sum_Bi [K_gwl(Bi) * X_gwl(Bi, t)
+                       + K_atm(Bi) * X_atm(Bi, t)
+                       + K_temp(Bi) * X_temp(Bi, t)]
+```
+
+The default period bands are:
+
+- `300–120 days`
+- `120–60 days`
+- `60–30 days`
+- `30–16 days`
+- `16–8 days`
 
 The fitted output is written to:
 
 - `dvv_model`
 - `dvv_residual = dvv_obs - dvv_model`
+
+The coefficients are fit only on the configured calibration period, then held fixed while predicting both the calibration and validation periods.
 
 ## Time-Grid Note
 
@@ -319,6 +363,79 @@ The transfer script supports:
   - `M0`
   - `EM0`
 
+## Quick Start
+
+1. Edit the file paths and physical parameters in `pore_pressure_model.py`.
+2. Edit the observed `dv/v` source and the calibration / validation windows in `dvv_transfer_model.py`.
+3. Run the workflow:
+
+```bash
+python pore_pressure_model.py
+python dvv_transfer_model.py
+python evaluate_dvv_model.py
+python visualize_dvv_results.py
+```
+
+4. Check the main outputs in `../output`:
+
+- `pore_pressure_output.csv`
+- `dvv_transfer_output.csv`
+- `dvv_transfer_coefficients.csv`
+- `dvv_model_metrics.csv`
+- `fig_dvv_observed_vs_modeled.png`
+- `fig_dvv_residual.png`
+
+## Practical Usage
+
+### Example 1: Use all station pairs from a DTT folder
+
+In `dvv_transfer_model.py`:
+
+```python
+OBSERVED_DVV_INPUT_MODE = "DTT_FOLDER"
+DVV_PAIR_MODE = "ALL"
+OBSERVED_DVV_DTT_FOLDER = "/path/to/ZZ"
+DVV_VALUE_COLUMN = "M0"
+DVV_SCALE = -100.0
+```
+
+This reads `M0` as `dt/t` and converts it to `dv/v (%)`.
+
+### Example 2: Use a single station pair
+
+In `dvv_transfer_model.py`:
+
+```python
+DVV_PAIR_MODE = "PAIR"
+DTT_STATION1 = "R7E04"
+DTT_STATION2 = "R94DB"
+```
+
+The script matches station codes inside DTT pair names, even if the file stores full names such as `5S_R7E04_5S_R94DB`.
+
+### Example 3: Change the calibration and validation windows
+
+In `dvv_transfer_model.py`:
+
+```python
+CALIBRATION_START_TIME = "2021-03-01"
+CALIBRATION_END_TIME = "2021-06-10"
+VALIDATION_START_TIME = "2021-06-11"
+VALIDATION_END_TIME = "2021-12-31"
+```
+
+Only the calibration period is used to estimate the transfer coefficients. The validation period is predicted using the same fitted coefficients.
+
+### Example 4: Change the final time resolution
+
+In `pore_pressure_model.py`:
+
+```python
+RESAMPLE_RULE = "1D"
+```
+
+This defines the common model grid. All physical predictors are aligned to this regular grid before the transfer step.
+
 ## How to Run
 
 Run the four scripts in order:
@@ -354,9 +471,13 @@ Set:
 - `DEPTHS_M`
 - `RHO_W`
 - `GRAVITY`
-- `ALPHA`
+- `SKEMPTON_B`
+- `UNDRAINED_POISSON_RATIO`
 - `HYDRAULIC_DIFFUSIVITY_M2_S`
-- thermoelastic constants if needed
+- `POISSON_RATIO`
+- `YOUNGS_MODULUS_PA`
+- `M_OVER_MU_RATIO`
+- other thermoelastic constants if needed
 - `OUTPUT_CSV_PATH`
 
 ### In `dvv_transfer_model.py`
@@ -367,9 +488,17 @@ Set:
 - `OBSERVED_DVV_INPUT_MODE`
 - `OBSERVED_DVV_DTT_FOLDER` or `OBSERVED_DVV_CSV_PATH`
 - `DVV_PAIR_MODE`
+- `DTT_STATION1`
+- `DTT_STATION2`
+- `DVV_VALUE_COLUMN`
+- `DVV_SCALE`
 - `MODEL_DEPTH_M`
 - `INCLUDE_THERMOELASTIC`
 - `FIT_INTERCEPT`
+- `CALIBRATION_START_TIME`
+- `CALIBRATION_END_TIME`
+- `VALIDATION_START_TIME`
+- `VALIDATION_END_TIME`
 
 ### In `evaluate_dvv_model.py`
 
