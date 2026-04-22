@@ -16,7 +16,7 @@ plt.rcParams["font.size"] = 11
 OUTPUT_DIR = "../output"
 DVV_TRANSFER_OUTPUT_CSV = os.path.join(OUTPUT_DIR, "dvv_transfer_output.csv")
 DVV_MODEL_METRICS_CSV = os.path.join(OUTPUT_DIR, "dvv_model_metrics.csv")
-SEISMICITY_CSV = "/Users/hmhuang/Sth_should_be_local/Iceland/datasets/catalog_202103-12.txt"
+SEISMICITY_CSV = "/Users/hmhuang/Sth_should_be_local/Iceland/datasets/seismic_catalog_202103-12.txt"
 SEISMICITY_MAGNITUDE_THRESHOLD = 1.0
 
 FIG_OBS_MODEL = os.path.join(OUTPUT_DIR, "fig_dvv_observed_vs_modeled.png")
@@ -88,7 +88,7 @@ def make_observed_modeled_plot(df, output_path, y_lim):
         df["dvv_obs_raw"] if "dvv_obs_raw" in df.columns else df["dvv_obs"],
         label="Observed dv/v (raw)",
         color="0.75",
-        linewidth=0.9,
+        linewidth=1.0,
     )
     ax.plot(
         df.index,

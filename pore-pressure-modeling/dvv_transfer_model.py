@@ -12,7 +12,6 @@ from dvv_model_utils import (
     compute_information_criteria,
 )
 
-
 # ========== #
 # User Input #
 # ========== #
@@ -20,7 +19,7 @@ OUTPUT_DIR = "../output"
 PORE_PRESSURE_CSV_PATH = os.path.join(OUTPUT_DIR, "pore_pressure_output.csv")
 OBSERVED_DVV_INPUT_MODE = "DTT_FOLDER"  # "CSV" or "DTT_FOLDER"
 OBSERVED_DVV_CSV_PATH = "observed_dvv.csv"
-OBSERVED_DVV_DTT_FOLDER = "/Users/hmhuang/Sth_should_be_local/Iceland/dvv_results/1_filter_202603/01/005_DAYS/ZZ"
+OBSERVED_DVV_DTT_FOLDER = "/Users/hmhuang/Sth_should_be_local/Iceland/datasets/dvv_results/1_filter_202603/01/005_DAYS/ZZ"
 DVV_PAIR_MODE = "ALL"  # "ALL" or "PAIR"
 DTT_STATION1 = None
 DTT_STATION2 = None
