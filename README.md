@@ -2,7 +2,7 @@
 
 This branch contains a small workflow for:
 
-1. Building physical predictors from groundwater level, atmospheric pressure, and well temperature
+1. Building physical predictors from groundwater level, atmospheric pressure, ERA5 snow depth, and well temperature
 2. Projecting those predictors to theoretical `dv/v(t)`
 3. Evaluating the modeled `dv/v` against observed `dv/v`
 
@@ -37,6 +37,7 @@ The current physical branches are:
 
 - Groundwater loading -> hydraulic pore-pressure response
 - Atmospheric pressure loading -> hydraulic pore-pressure response
+- Snow loading from ERA5 snow depth -> hydraulic pore-pressure response
 - Well temperature -> thermoelastic `dv/v` predictor
 
 The current modeling logic does not force temperature into the hydraulic pore-pressure branch. Instead, temperature is treated as a separate thermoelastic mechanism and is combined with the pressure-driven branches only at the `dv/v` projection stage.
@@ -48,12 +49,14 @@ The current modeling logic does not force temperature into the hydraulic pore-pr
 This script:
 
 - Reads the well CSV
-- Reads the atmospheric pressure text file
+- Reads the atmospheric pressure file
+- Reads the ERA5-Land snow CSV
 - Builds an explicit regular model time grid using `pd.date_range(start, end, freq=RESAMPLE_RULE)`
 - Aligns all data sets to that final user-defined time resolution
 - Computes pore-pressure responses from:
   - groundwater level
   - atmospheric pressure
+  - snow depth loading
 - Computes a thermoelastic predictor from well temperature using a Tsai (2011)-style harmonic formulation
 - Writes a single output CSV that contains the aligned observations and all physical predictors
 
@@ -62,10 +65,14 @@ Typical output columns include:
 - `gwl_m_asl`
 - `well_temp_c`
 - `patm_pa`
+- `era5_snow_depth_m`
+- `era5_snow_cover`
 - `gwl_loading_pa`
 - `atm_loading_pa`
+- `snow_loading_pa`
 - `Pp_gwl_z500m_pa`, `Pp_gwl_z700m_pa`, `Pp_gwl_z1900m_pa`
 - `Pp_atm_z500m_pa`, `Pp_atm_z700m_pa`, `Pp_atm_z1900m_pa`
+- `Pp_snow_z500m_pa`, `Pp_snow_z700m_pa`, `Pp_snow_z1900m_pa`
 - `Pp_total_z500m_pa`, ...
 - `dPp_total_z500m_pa`, ...
 - `dvv_temp_thermoelastic`
@@ -79,6 +86,7 @@ This script:
 - Builds the regression design matrix from:
   - groundwater pore-pressure predictor
   - atmospheric pore-pressure predictor
+  - snow pore-pressure predictor
   - thermoelastic predictor
 - Band-pass filters each predictor and the observed `dv/v` into Rivet-style period bands
 - Estimates band-dependent transfer coefficients using only the configured calibration period
@@ -133,16 +141,16 @@ This script:
 
 The current plotting script writes the figures to the common output folder:
 
-- `../output/fig_dvv_observed_vs_modeled.png`
-- `../output/fig_dvv_residual.png`
-- `../output/fig_dvv_predictors.png`
+- `../output-2/fig_dvv_observed_vs_modeled.png`
+- `../output-2/fig_dvv_residual.png`
+- `../output-2/fig_dvv_predictors.png`
 
 In the current plotting defaults:
 
 - the observed `dv/v` is shown both as a raw gray curve and as a median-filtered black curve
 - the observed-vs-modeled and residual plots use a fixed y-axis range of `±0.3%`
 - the residual plot includes daily seismicity counts for events with `M > 3`
-- the observed-vs-modeled figure also includes a lower panel showing total hydraulic pore pressure (`gwl + atm`) before transfer, with the thermoelastic predictor shown on a secondary axis when available
+- the observed-vs-modeled figure also includes a lower panel showing total hydraulic pore pressure (`gwl + atm + snow`) before transfer, with the thermoelastic predictor shown on a secondary axis when available
 - calibration and validation periods are lightly shaded in the `dv/v` comparison and residual plots
 
 ## Shared Helper Module
@@ -213,6 +221,7 @@ This formulation is applied to:
 
 - groundwater pressure loading
 - atmospheric pressure loading
+- snow loading derived from ERA5 snow depth
 
 The poroelastic constant is computed from:
 
@@ -230,7 +239,7 @@ where:
 At each modeled depth:
 
 ```text
-Pp_total(z, t) = Pp_gwl(z, t) + Pp_atm(z, t)
+Pp_total(z, t) = Pp_gwl(z, t) + Pp_atm(z, t) + Pp_snow(z, t)
 ```
 
 The script also writes the mean-removed total pore-pressure anomaly:
@@ -239,7 +248,29 @@ The script also writes the mean-removed total pore-pressure anomaly:
 dPp_total(z, t) = Pp_total(z, t) - mean(Pp_total(z, t))
 ```
 
-### 5. Thermoelastic predictor
+### 5. Snow loading
+
+The snow branch currently uses ERA5-Land time-series `snow depth` (`sde`) as a snow-thickness proxy.
+
+The current implementation converts snow depth to an approximate surface load by:
+
+```text
+P_snow(t) = rho_snow * g * H_snow(t)
+```
+
+where:
+
+- `rho_snow` is the assumed bulk snow density
+- `g` is gravity
+- `H_snow(t)` is ERA5 snow depth in meters
+
+The default branch in `pore_pressure_model.py` currently uses:
+
+- `rho_snow = 300 kg m^-3`
+
+This is an approximate loading conversion. It is not equivalent to snow water equivalent unless the density assumption is adjusted accordingly.
+
+### 6. Thermoelastic predictor
 
 The thermoelastic branch follows the Luo et al. (2025) supplementary formulation based on Tsai (2011).
 
@@ -283,7 +314,7 @@ This branch is computed in `pore_pressure_model.py` and exported as:
 
 - `dvv_temp_thermoelastic`
 
-### 6. Transfer from predictors to modeled `dv/v`
+### 7. Transfer from predictors to modeled `dv/v`
 
 The current implementation uses an extended Rivet-like band transfer.
 
@@ -297,6 +328,7 @@ In the current extended version, this is applied separately to:
 
 - `X_gwl(Bi)`
 - `X_atm(Bi)`
+- `X_snow(Bi)`
 - `X_temp(Bi)`
 
 and the modeled time series is reconstructed by summing the bandwise contributions:
@@ -304,6 +336,7 @@ and the modeled time series is reconstructed by summing the bandwise contributio
 ```text
 dv/v_model(t) ~= sum_Bi [K_gwl(Bi) * X_gwl(Bi, t)
                        + K_atm(Bi) * X_atm(Bi, t)
+                       + K_snow(Bi) * X_snow(Bi, t)
                        + K_temp(Bi) * X_temp(Bi, t)]
 ```
 
@@ -330,7 +363,7 @@ The physical predictors are not indexed by the raw groundwater sampling times. I
 pd.date_range(start, end, freq=RESAMPLE_RULE)
 ```
 
-and aligns groundwater, atmospheric pressure, and well temperature to that common grid.
+and aligns groundwater, atmospheric pressure, ERA5 snow depth, and well temperature to that common grid.
 
 This matters because observed `dv/v` is later joined to the predictor table using exact timestamps. Using a complete regular model grid avoids artificially sparse `dv/v` comparison results caused by irregular groundwater data availability.
 
@@ -350,7 +383,20 @@ Special handling:
 
 ### Atmospheric pressure data
 
-Expected input is the monthly IMO text format currently used in this project.
+The current branch supports:
+
+- the monthly IMO text format used in the original workflow
+- the local Grindavik station CSV used in `pore_pressure_model.py`
+
+### ERA5 snow data
+
+Expected input is an ERA5-Land time-series CSV containing:
+
+- `valid_time`
+- `sde` for snow depth in meters
+- optionally `snowc` for snow cover
+
+The current branch will raise an error if `sde` is entirely empty, which usually means the selected ERA5-Land point is over ocean rather than land.
 
 ### Observed `dv/v`
 
@@ -376,7 +422,7 @@ python evaluate_dvv_model.py
 python visualize_dvv_results.py
 ```
 
-4. Check the main outputs in `../output`:
+4. Check the main outputs in `../output-2`:
 
 - `pore_pressure_output.csv`
 - `dvv_transfer_output.csv`
@@ -452,7 +498,7 @@ python visualize_dvv_results.py
 All generated CSV files and figures are written to:
 
 ```text
-../output
+../output-2
 ```
 
 Each script creates the directory automatically if it does not already exist.
@@ -465,12 +511,15 @@ Set:
 
 - `GWL_CSV_PATH`
 - `ATM_TXT_PATH`
+- `ERA5_SNOW_CSV_PATH`
 - `START_TIME`
 - `END_TIME`
 - `RESAMPLE_RULE`
 - `DEPTHS_M`
+- `INCLUDE_SNOW_LOADING`
 - `RHO_W`
 - `GRAVITY`
+- `SNOW_DENSITY_KG_M3`
 - `SKEMPTON_B`
 - `UNDRAINED_POISSON_RATIO`
 - `HYDRAULIC_DIFFUSIVITY_M2_S`
@@ -494,6 +543,7 @@ Set:
 - `DVV_SCALE`
 - `MODEL_DEPTH_M`
 - `INCLUDE_THERMOELASTIC`
+- `INCLUDE_SNOW_LOADING`
 - `FIT_INTERCEPT`
 - `CALIBRATION_START_TIME`
 - `CALIBRATION_END_TIME`
@@ -514,30 +564,31 @@ Set:
 
 ### From `pore_pressure_model.py`
 
-- `../output/pore_pressure_output.csv`
+- `../output-2/pore_pressure_output.csv`
 
 ### From `dvv_transfer_model.py`
 
-- `../output/dvv_transfer_output.csv`
-- `../output/dvv_transfer_coefficients.csv`
+- `../output-2/dvv_transfer_output.csv`
+- `../output-2/dvv_transfer_coefficients.csv`
 
 ### From `evaluate_dvv_model.py`
 
-- `../output/dvv_model_metrics.csv`
-- `../output/dvv_model_cv.csv`
+- `../output-2/dvv_model_metrics.csv`
+- `../output-2/dvv_model_cv.csv`
 
 ### From `visualize_dvv_results.py`
 
-- `../output/fig_dvv_observed_vs_modeled.png`
-- `../output/fig_dvv_residual.png`
-- `../output/fig_dvv_predictors.png`
+- `../output-2/fig_dvv_observed_vs_modeled.png`
+- `../output-2/fig_dvv_residual.png`
+- `../output-2/fig_dvv_predictors.png`
 
 ## Current Assumptions and Limits
 
-- The hydraulic branch currently uses the same diffusion-style kernel for groundwater and atmospheric pressure loading.
+- The hydraulic branch currently uses the same diffusion-style kernel for groundwater, atmospheric, and snow loading.
 - The thermoelastic branch currently uses a seasonal harmonic formulation rather than a fully transient thermal diffusion inversion.
 - The transfer from physical predictors to `dv/v` is currently linear.
 - The observed `dv/v` aggregation in `ALL` mode currently uses the median of all non-autocorrelation station pairs per day.
+- The current snow-loading implementation uses snow depth with an assumed bulk snow density, not a true SWE product.
 
 ## References
 
